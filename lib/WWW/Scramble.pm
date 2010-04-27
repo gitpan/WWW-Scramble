@@ -3,6 +3,8 @@ use Moose;
 use WWW::Scramble::Entry;
 use WWW::Scramble::Handler;
 use WWW::Mechanize;
+use File::Find::Rule;
+use YAML;
 
 =head1 NAME
 
@@ -10,16 +12,17 @@ WWW::Scramble - The great new WWW::Scramble!
 
 =head1 VERSION
 
-Version 0.01
+Version 0.03
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.03';
 
 has mech => ( is => 'ro', isa => 'WWW::Mechanize', default => sub { WWW::Mechanize->new } );
 has handler => (
     is => 'rw', isa => 'WWW::Scramble::Handler', default => sub { WWW::Scramble::Handler->new }
 );
+has assets => ( is => 'rw', isa => 'HashRef[Str]', default => sub { {} } );
 
 =head1 SYNOPSIS
 
@@ -37,9 +40,16 @@ Perhaps a little code snippet.
 
 =head1 FUNCTIONS
 
-=head2 _fetch
-
 =cut 
+
+=head2 BUILD
+
+=cut
+
+sub BUILD {
+    my $self = shift;
+    $self->loadassets("./");
+};
 
 sub _fetch {
     my ($self, $url, $attr_ref) = @_;
@@ -47,9 +57,35 @@ sub _fetch {
     return $self->mech->response->status_line
         unless $self->mech->success;
     my %attr;
-    %attr = %{$attr_ref} if ref $attr_ref eq 'HASH';
+    if ($attr_ref and ref $attr_ref eq 'HASH') {
+        %attr = %{$attr_ref};
+    } else { # no specified hash, so...
+        my %h = %{$self->assets};
+        for my $key (keys %h) {
+            my $handle = delete $h{$key}->[0]->{handle};
+            next unless $handle and $url =~ m/$handle/;
+            %attr = %{$h{$key}->[0]};
+        }
+    };
     for my $key (keys %attr) {
         $self->handler->set_asset($key, $attr{$key});
+    }
+}
+
+=head2 loadassets
+
+=cut
+
+sub loadassets {
+    my($self, $assetsdir) = @_;
+
+    my $rule = File::Find::Rule->new;
+    $rule->name("*.yaml");
+    for my $file ($rule->in($assetsdir)) {
+        my $base = File::Basename::basename($file);
+        my @data = YAML::LoadFile($file);
+
+        $self->assets->{$base} = \@data;
     }
 }
 
@@ -82,6 +118,7 @@ sub fetchnews {
     $self->_fetch(@_);
     return WWW::Scramble::Entry->new ( uri => $self->mech->uri, _rawdata => $self->mech->content, _handler => $self->handler );
 }
+
 
 =head1 AUTHOR
 
